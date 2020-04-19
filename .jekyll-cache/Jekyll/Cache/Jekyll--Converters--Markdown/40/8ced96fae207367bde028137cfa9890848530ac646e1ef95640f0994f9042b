@@ -1,0 +1,164 @@
+I"�:<p>Java的四种引用类型大家应该都知道，其中强引用是最为普通也是我们普遍常用的一种引用，正常声明变量引用对象时用的就是这种引用，其他另外三种引用大多数人可能都听过，知道其的特性，但是却很少有人知道其他三种引用的应用场景有哪些，今天，本篇内容就讲解一下软引用和弱引用的一些应用。本篇只简单解释四大引用，不进行过多的理论知识，着重于应用场景，如果有人还不知道Java的四大引用类型的话，可以自行查找资料，或者我先踩个坑，等后面有时间了写一下加个链接。</p>
+
+<blockquote>
+  <h3 id="提要">提要</h3>
+  <ol>
+    <li>什么是引用？</li>
+    <li>什么是软、弱引用？</li>
+    <li>为什么要有软、弱引用？</li>
+    <li>软、弱引用可以做什么？</li>
+  </ol>
+</blockquote>
+
+<hr />
+
+<h4 id="什么是引用">什么是引用？</h4>
+<p>为了使用Java对象，Java程序需要通过栈上的refreence数据来操作堆上的具体对象。而由于虚拟机规范中只规定了一个指向对象的引用，并没有定义这个引用应该通过何种方式去定位、访问堆中的对象的具体位置，所以Java对象的访问方式其实取决于虚拟机实现而定的。看到这里应该就知道了，我们可以抽象的把定位以及访问堆中对象具体位置的一个东西叫做引用，这个概念比较抽象，可以多读两遍体会一下。</p>
+
+<h4 id="什么是软弱引用">什么是软、弱引用？</h4>
+<p>软引用（SoftReference）就是用来描述一些还有用但是并非必须的对象。对于软引用关联着的对象，在系统将要发生OOM之前，会将这些对象列进回收范围进行第二次回收（注意，这里说的是只有软引用引用的对象，对于那些还有强引用引用的对象不会回收，比如Object obj = softReference.get()）。如果这次回收依旧没有足够的内存，才会抛出OOM。<br />
+写法是：</p>
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="nc">SoftReference</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">softReference</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">SoftReference</span><span class="o">&lt;&gt;();</span></code></pre></figure>
+
+<p>弱引用（WeakReference）也是用来描述一些非必要的对象的，但是它的强度比软引用更弱一些，被弱引用关联的对象只能生存到下一次GC发生之前。当gc 的时候，不管当前内存是否足够，都会回收掉只被弱引用引用的对象。<br />
+写法是：</p>
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="nc">WeakReference</span><span class="o">&lt;</span><span class="no">T</span><span class="o">&gt;</span> <span class="n">weakReference</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">WeakReference</span><span class="o">&lt;&gt;();</span></code></pre></figure>
+
+<h4 id="为什么要有软弱引用">为什么要有软、弱引用？</h4>
+<p>在JDK 1.2之前，Java对象只有被引用和没有被引用两种状态，这对于一些描述一些“食之无味，弃之可惜”的对象的时候就显得有些无能为力。我们的希望是：当内存空间还足够的时候，能将这些对象保留在内存中，而如果内存很紧张的时候就抛弃这些对象。在这种需求下，JDK 1.2之后就对引用的概念进行了扩充，将引用分为了四种，分别是：强引用，软引用，弱引用，虚引用，这四种引用的强度依次减弱。</p>
+
+<h4 id="软弱引用可以做什么">软、弱引用可以做什么？</h4>
+<p>这就到了本文的重点了，软引用和弱引用可以做什么呢？通过上面的几个问题，我们大概知道了这两种引用的一些特性，但是这些有没有什么应用场景呢？如果你看过Mybatis的源码的话，那你们心里可能就有了答案，对的，本地缓存，我们可以通过这两种引用做一个缓存系统，利用他们在只和软、弱引用关联的时候系统的gc来淘汰一些老旧的对象，以达到缓存中的都是最近都使用的对象的效果，怎么样，听起来是不是很像LRU，但是和LRU又有一些不同，这里保持一点神秘感，下面将一下Mybatis中的一部分代码贴出来看一下人家是怎么用的。
+Mybatis的cache模块中有一个WeakCache类，其中的类的成员变量如下：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="c1">//&lt;1&gt;强连接队列，避免垃圾收集
+</span>
+<span class="kd">private</span> <span class="kd">final</span> <span class="nc">Deque</span><span class="o">&lt;</span><span class="nc">Object</span><span class="o">&gt;</span> <span class="n">hardLinksToAvoidGarbageCollection</span><span class="o">;</span>
+<span class="c1">//&lt;2&gt;垃圾收集后的队列，如果某一个弱引用的值被垃圾回收了，那么这个弱引用值会被加入到这个队列中
+</span>
+<span class="kd">private</span> <span class="kd">final</span> <span class="nc">ReferenceQueue</span><span class="o">&lt;</span><span class="nc">Object</span><span class="o">&gt;</span> <span class="n">queueOfGarbageCollectedEntries</span><span class="o">;</span>
+<span class="c1">//&lt;3&gt;
+</span>
+<span class="kd">private</span> <span class="kd">final</span> <span class="nc">Cache</span> <span class="n">delegate</span><span class="o">;</span>
+<span class="c1">//&lt;4&gt;强连接的数量
+</span>
+<span class="kd">private</span> <span class="kt">int</span> <span class="n">numberOfHardLinks</span><span class="o">;</span></code></pre></figure>
+
+<p>上面的代码我写了一些注释，其中&lt;1&gt;的位置我们可以看到有一个队列，从这个队列的名字我们应该猜出来，这个队列是用来保持队列的对象有一个强引用防止队列中的对象被gc用的，为什么我们用弱引用还得给保持一个强引用呢？这不就让弱引用没有作用了么？不急，我们慢慢往后看。<br />
+&lt;3&gt;位置有一个Cache对象，是一个被修饰的类，这个类里面其实也是一个缓存系统，这里WeakCache在这个对象的基础上进行了一些修饰，就是一个修饰类，缓存的值在被封装了一下后都放在这个对象里面。<br />
+&lt;4&gt;位置就是一个强引用最大数量，也就是规定一下强引用队列的长度。  <br />
+这里&lt;2&gt;位置的队列我是故意漏掉的，后面解释这个队列的作用，这里暂时不用管这个。</p>
+
+<pre><code class="language-Java">//构造器的话就比较简单，传入被修饰的cache对象，以及其他变量的初始化
+public WeakCache(Cache delegate) {
+    this.delegate = delegate;
+    this.numberOfHardLinks = 256;
+    this.hardLinksToAvoidGarbageCollection = new LinkedList&lt;&gt;();
+    this.queueOfGarbageCollectedEntries = new ReferenceQueue&lt;&gt;();
+  }
+</code></pre>
+<p>现在缓存对象生成了，下面我们来看一下怎么往缓冲中加东西。</p>
+<pre><code class="language-Java">public void putObject(Object key, Object value) {
+	//&lt;1&gt;
+    removeGarbageCollectedItems();
+    //这里构建的WeakEntry传了queueOfGarbageCollectedEntries，
+    // 那如果value被回收了，那WeakEntry将会出现在queueOfGarbageCollectedEntries中
+    //&lt;2&gt;
+    delegate.putObject(key, new WeakEntry(key, value, queueOfGarbageCollectedEntries));
+  }
+</code></pre>
+<p>&lt;1&gt;这里移除了被gc的对象，先不去深究，知道这个方法是干嘛的就行，然后往后看。<br />
+&lt;2&gt;这里是真正的缓存对象，构造了一个WeakEntry对象，传入key、value以及一个gc后的entry对象队列，这里可以看到，delegate不是直接缓存value对象，而是将value对象封装了一下再缓存起来，我们来看一下这个WeakEntry类是什么样的。</p>
+
+<pre><code class="language-Java">//继承了弱引用，增加了缓存的key字段用来在value被gc后删掉缓存中的弱引用
+  private static class WeakEntry extends WeakReference&lt;Object&gt; {
+    private final Object key;
+
+    private WeakEntry(Object key, Object value, ReferenceQueue&lt;Object&gt; garbageCollectionQueue) {
+      super(value, garbageCollectionQueue);
+      this.key = key;
+    }
+  }
+</code></pre>
+<p>代码很简单，看到这里我们应该就明白了，真正要缓存的value对象在这里被弱引用对象封装起来了，如果外部没有其他的引用的话，那就只剩下这个弱引用对象对value对象还有引用了，WeakEntry继承了WeakReference，增加了key字段来保存value的key值，这里有一个需要注意的地方，WeakEntry的构造方法里调用了父类的构造器，并且把value对象和一个gc队列传了过去，点进去就可以看到软引用有一个接收value和队列的构造器。
+对象缓存了起来，下一步就是从缓存中获取对象了</p>
+<pre><code class="language-Java">public Object getObject(Object key) {
+    Object result = null;
+    @SuppressWarnings("unchecked") // assumed delegate cache is totally managed by this cache
+      //缓存中存放的时候弱引用
+      WeakReference&lt;Object&gt; weakReference = (WeakReference&lt;Object&gt;) delegate.getObject(key);
+    if (weakReference != null) {
+      result = weakReference.get();
+      //弱引用里的值为空，说明value对象已经被gc了，所以缓存中的弱引用对象也应该被清除
+      if (result == null) {
+        delegate.removeObject(key);
+      } else {
+        //如果不为空的话，那这个value值会被加入到强引用队列中，这意味着即使外部没有了这个对象的引用，
+        // 这个对象会因为强引用队列的作用多活一段时间，直到被挤出队列后的下一个gc回收
+        hardLinksToAvoidGarbageCollection.addFirst(result);
+        if (hardLinksToAvoidGarbageCollection.size() &gt; numberOfHardLinks) {
+          hardLinksToAvoidGarbageCollection.removeLast();
+        }
+      }
+    }
+    return result;
+  }
+</code></pre>
+<p>代码上我已经写了详细的注释，这里就大概解释一下，首先根据key值拿到缓存中的WeakEntry对象（这个对象就是上面put进去的时候封装的对象），然后就是获取软引用对象里的value值，如果value为空，表示外部没有value对象的引用，因为只有软引用对象的引用而在之前的某次gc中回收了，所以key从换中移除；不为空的话，就将这个value值加入到强引用队列中，表示这个值现在获取了一次，以后再次获取这个值的几率很大，不要那么快gc掉这个对象。因为队列用有这个对象的引用，在没有从队列中挤出去之前，gc都不会回收这个对象，直到这个对象从队列中挤出去后的下一次gc回收。然后判断队列是否满，满了的话则移除队尾的值。这就是和LRU不一样的地方，在LRU中，只要加入的话，即使没用也要等到从队尾挤出去才能回收，而WeakCache只有用的时候才会才会加入到队列，只是缓存而不用的话就会在下一次gc中被回收。
+下面我们回到putObject()方法中的removeGarbageCollectedItems()方法;</p>
+
+<pre><code class="language-Java">/**
+   * 清除所有被gc的key值
+   * queueOfGarbageCollectedEntries 中保存了所有的被gc的弱引用
+   */
+  private void removeGarbageCollectedItems() {
+    WeakEntry sv;
+    //如果某个弱引用出现在这个队列中，说明这个弱引用的值被gc 了，此时移除缓存中的该弱引用
+    while ((sv = (WeakEntry) queueOfGarbageCollectedEntries.poll()) != null) {
+      delegate.removeObject(sv.key);
+    }
+  }
+</code></pre>
+<p>从代码中我们可以看到，这个方法的作用是将队列中的所有值弹出来，然后将其中缓存中移除。注意，队列中弹出来的是WeakEntry对象，WeakEntry对象中有缓存的key和value值，这里是通过key将缓存中的值删除，表示缓存中的这个值已经没有了或者说已经被gc了。
+我们可以看一下WeakReference的这个构造方法源码</p>
+<pre><code class="language-Java">/**
+     * Creates a new weak reference that refers to the given object and is
+     * registered with the given queue.
+     *
+     * @param referent object the new weak reference will refer to
+     * @param q the queue with which the reference is to be registered,
+     *          or {@code null} if registration is not required
+     */
+    public WeakReference(T referent, ReferenceQueue&lt;? super T&gt; q) {
+        super(referent, q);
+    }
+</code></pre>
+<p>这个方法的注释其实写的不太清楚，只是说这个构造器会创建一个传入对象的weak reference，和把这个weak reference加入到给定的队列中，并没有说什么时候入队的，这里调用的是父类的构造器也就是Reference<T> 抽象类的，继续向上找找，</T></p>
+<pre><code class="language-Java">
+/* The queue this reference gets enqueued to by GC notification or by
+     * calling enqueue().
+     *
+     * When registered: the queue with which this reference is registered.
+     *        enqueued: ReferenceQueue.ENQUEUE
+     *        dequeued: ReferenceQueue.NULL
+     *    unregistered: ReferenceQueue.NULL
+     */
+    volatile ReferenceQueue&lt;? super T&gt; queue;
+
+/* -- Constructors -- */
+
+    Reference(T referent) {
+        this(referent, null);
+    }
+
+    Reference(T referent, ReferenceQueue&lt;? super T&gt; queue) {
+        this.referent = referent;
+        this.queue = (queue == null) ? ReferenceQueue.NULL : queue;
+    }
+</code></pre>
+<p>这一块的方法没有注释，但是成员变量queue有注释，可以看到注释写的很清楚，只有当GC notification以及调用队列的enqueue()的时候才会入列，也就是说我们没有主动调用enqueue()方法的话，那这个队列里的所有的软引用都是在被gc通知的时候加入的。现在我们应该知道为什么removeGarbageCollectedItems()方法里直接就是将所有的key从缓存中移除了吧，因为这些key对应的value都已经被gc掉了。</p>
+
+<p>OK，到这里基本上就讲了一下弱引用在本地缓存中的应用，上面的代码还是比较简单的，思路我都给你们捋了下，较为清晰，主要就是利用了弱引用的特性再加上一个gc队列和一个强引用队列来保证缓存中存储都是最近比较常用的对象，尽可能的在少用内存的情况下缓存最有用的东西，软引用同理只是gc的时候是内存不足的时候，其他的代码基本上是一致的，有兴趣的小伙伴可以看一下Mybatis的cache模块下的SoftReference类。</p>
+
+<p>本人水平有限，如果有不足的地方，欢迎各位大佬点击左边加我的联系方式一起讨论。</p>
+:ET

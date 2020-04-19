@@ -11,11 +11,11 @@ site-twitter: #if your site has a twitter account, enter it here
 # Author Settings
 author: zhongshengming # add your name
 author-img: head.jpg # add your photo
-about-author: java开发 # add description
-social-twitter: # add your Twitter handle
-social-facebook: # add your Facebook handle
+about-author: Java开发，大家一起多多交流！ # add description
 social-github: brandon-zhong # add your Github handle
 social-email: brandon-zhong8859@foxmail.com # add your Email address
+social-wechat: wechat-qrcode.jpg
+social-qq: qq-qrcode.jpg
 
 # Disqus
 discus-identifier: # add your discus identifier
