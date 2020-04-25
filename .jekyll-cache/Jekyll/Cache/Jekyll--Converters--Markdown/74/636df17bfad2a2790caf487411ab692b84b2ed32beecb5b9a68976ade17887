@@ -1,0 +1,35 @@
+I"r<p>原文：https://dzone.com/articles/introduction-to-java-bytecode
+即使对有经验的Java开发者来说，阅读编译后的Java字节码也是相当乏味的。那为什么我们首先需要了解这么低等级的东西呢？上周在我身上发生了一个事：为了修改一个性能问题，我对我机器上的一段很老的代码做了一些修改，编译成JAR包并部署到服务器。不幸的，这个修改因为某些原因没有被版本控制系统检测到，导致本地代码删了。一个月后，当我想再次看一下这些修改的很时候，我发现我找不到源码了。<br />
+幸运的是编译后的代码一直在远程服务器上放着。这让我松了一口气，我下载下JAR包并用反编译编辑器打开它。但是有一个问题，这个反编译工具并不是完美的，对于大多数类来说没问题，但是基于某些原因，对于一些特定类的反编译会触发一个bug导致UI界面闪退！<br />
+特殊情况特殊处理。幸运的是我对字节码很熟悉，我宁愿花一些时间手动反编译这些代码，也不愿重写并再次测试它们。因为我至少还记得从哪里开始看代码。通过这些字节码帮助我精确的指明哪些修改并以源码的形式构建过来。<br />
+字节码最棒的一件事就是你只要学习它的语法一次，就能使用所有Java平台支持的字节码，因为字节码是代码的中间表示，不是底层CPU实际执行的机器码。此外，因为JVM的架构简单，和简单的指令集，字节码相比于本地机器码会更加简单。并且Oracle提供了所有指令的完整文档。<br />
+在学习字节码指令集之前。我们先熟悉几个JVM的前提条件：</p>
+<h2 id="jvm数据类型">JVM数据类型</h2>
+<p>Java是一个静态类型语言，这影响了字节码指令的设计，比如一个指令期望操作指定类型的值。举个例子，这里有几个加指令用来将两个数值想家：iadd, ladd, fadd, dadd。它们期待操作的数据类型分别是：int, long, float 和 double。大多数的字节码有依赖操作类型来变化不同的形式以完成相同的功能的特性。<br />
+JVM定义了以下数据类型：</p>
+<ol>
+  <li>基础类型：
+    <ul>
+      <li><code class="highlighter-rouge">byte</code>(8-bit), <code class="highlighter-rouge">short</code>(16-bit),  <code class="highlighter-rouge">int</code>(32-bit), <code class="highlighter-rouge">long</code>(64-bit), <code class="highlighter-rouge">char</code>(16-bit), <code class="highlighter-rouge">float</code>(32-bit), <code class="highlighter-rouge">double</code>(64-bit).</li>
+      <li><code class="highlighter-rouge">boolean</code>type</li>
+      <li>returnAddress : 指令指针</li>
+    </ul>
+  </li>
+  <li>引用类型：
+    <ul>
+      <li>Class types</li>
+      <li>Array types</li>
+      <li>Interface types
+在字节码里boolean类型被限制支持。比如没有指令用来直接操作Boolean值。boolean值在编译的时候被替换成int值，并用int的指令操作。
+Java开发者应该熟悉上面的所有类型，除了是returnAddress类型，在其他语言类型种没有与之对应的存在。
+        <h2 id="基于栈的架构">基于栈的架构</h2>
+        <p>由于Sun公司反对基于注册的架构，于是他们设计了基于栈的虚拟机架构，这也就导致了大部分的字节码指令都很简单。JVM进程使用了各种不同的内存组件，但是只有JVM栈需要被详细检查以遵循字节码指令：
+PC寄存器（PC register）：PC寄存器需要记录下每个正在运行的java线程运行的当前指令的位置。
+JVM栈（JVM stack）：每个线程都会申请一个栈用来保存本地变量、方法参数以及返回值。下图展示了3个线程的栈区。<br />
+ <img src="/assets/img/Introduction_to_Java_Bytecode/jvm_stacks.png" alt="jvm stacks" /></p>
+      </li>
+    </ul>
+  </li>
+</ol>
+
+:ET
