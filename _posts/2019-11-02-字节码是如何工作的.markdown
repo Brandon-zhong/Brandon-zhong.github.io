@@ -231,10 +231,10 @@ public static void main(java.lang.String[]);
 dup指令复制(duplicate)操作数栈顶的值，这意味着现在在栈顶有两个Point对象的引用，接下来的三个指令将构造函数(用来初始化对象)的参数push到操作数栈中，之后调用指定的初始化(init)方法,这个方法其实就是对应类的构造器。dup出来的引用表明哪里的x和y会被初始化。方法结束之后，操作数栈顶的三个值被消费，最后只保留了一个创建对象的源引用(目前为止，对象初始化完成)。
 ![init]({{site.baseurl}}/assets/img/{{page.img-folder}}/init.png)  
 
-下一步，astore_1指令从操作数栈中pop出Point的引用并将其分配到本地变量数组的下标1位置(astore_1中的a表明这是一个引用值)。
+下一步，astore_1指令从操作数栈中pop出Point的引用并将其分配到本地变量数组的下标1位置(astore_1中的a表明这是一个引用值)。  
 ![init_store]({{site.baseurl}}/assets/img/{{page.img-folder}}/init_store.png)  
 
-创建和初始化第二个Point重复了一样的流程,这个对象被分配到b变量。
+创建和初始化第二个Point重复了一样的流程,这个对象被分配到b变量。  
 ![init2]({{site.baseurl}}/assets/img/{{page.img-folder}}/init2.png)![init_store2]({{site.baseurl}}/assets/img/{{page.img-folder}}/init_store2.png)  
 
 最后一步从本地变量数组的1-2位置读取两个Point对象的引用(分别使用aload_1和aload_2指令),然后使用invokevirtual指令调用area方法，这个指令基于实际对象的类型来处理分发适当方法的调用,例如：如果变量a包含了一个继承自Point的SpecialPoint类型的实例，这个子类型override了area方法，这时这个重写的方法会被调用，在这个例子中，没有子类型，因此只有一个area方法是有效的。  

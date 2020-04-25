@@ -1,0 +1,334 @@
+I"lr<p>原文：https://dzone.com/articles/introduction-to-java-bytecode
+即使对有经验的Java开发者来说，阅读编译后的Java字节码也是相当乏味的。那为什么我们首先需要了解这么低等级的东西呢？上周在我身上发生了一个事：为了修改一个性能问题，我对我机器上的一段很老的代码做了一些修改，编译成JAR包并部署到服务器。不幸的，这个修改因为某些原因没有被版本控制系统检测到，导致本地代码删了。一个月后，当我想再次看一下这些修改的很时候，我发现我找不到源码了。<br />
+幸运的是编译后的代码一直在远程服务器上放着。这让我松了一口气，我下载下JAR包并用反编译编辑器打开它。但是有一个问题，这个反编译工具并不是完美的，对于大多数类来说没问题，但是基于某些原因，对于一些特定类的反编译会触发一个bug导致UI界面闪退！<br />
+特殊情况特殊处理。幸运的是我对字节码很熟悉，我宁愿花一些时间手动反编译这些代码，也不愿重写并再次测试它们。因为我至少还记得从哪里开始看代码。通过这些字节码帮助我精确的指明哪些修改并以源码的形式构建过来。<br />
+字节码最棒的一件事就是你只要学习它的语法一次，就能使用所有Java平台支持的字节码，因为字节码是代码的中间表示，不是底层CPU实际执行的机器码。此外，因为JVM的架构简单，和简单的指令集，字节码相比于本地机器码会更加简单。并且Oracle提供了所有指令的完整文档。<br />
+在学习字节码指令集之前。我们先熟悉几个JVM的前提条件：</p>
+<h2 id="jvm数据类型">JVM数据类型</h2>
+<p>Java是一个静态类型语言，这影响了字节码指令的设计，比如一个指令期望操作指定类型的值。举个例子，这里有几个加指令用来将两个数值想家：iadd, ladd, fadd, dadd。它们期待操作的数据类型分别是：int, long, float 和 double。大多数的字节码有依赖操作类型来变化不同的形式以完成相同的功能的特性。<br />
+JVM定义了以下数据类型：</p>
+<ol>
+  <li>基础类型：
+    <ul>
+      <li><code class="highlighter-rouge">byte</code>(8-bit), <code class="highlighter-rouge">short</code>(16-bit),  <code class="highlighter-rouge">int</code>(32-bit), <code class="highlighter-rouge">long</code>(64-bit), <code class="highlighter-rouge">char</code>(16-bit), <code class="highlighter-rouge">float</code>(32-bit), <code class="highlighter-rouge">double</code>(64-bit).</li>
+      <li><code class="highlighter-rouge">boolean</code>type</li>
+      <li>returnAddress : 指令指针</li>
+    </ul>
+  </li>
+  <li>引用类型：
+    <ul>
+      <li>Class types</li>
+      <li>Array types</li>
+      <li>Interface types
+在字节码里boolean类型被限制支持。比如没有指令用来直接操作Boolean值。boolean值在编译的时候被替换成int值，并用int的指令操作。
+Java开发者应该熟悉上面的所有类型，除了是returnAddress类型，在其他语言类型种没有与之对应的存在。
+        <h2 id="基于栈的架构">基于栈的架构</h2>
+        <p>由于Sun公司反对基于注册的架构，于是他们设计了基于栈的虚拟机架构，这也就导致了大部分的字节码指令都很简单。JVM进程使用了各种不同的内存组件，但是只有JVM栈需要被详细检查以遵循字节码指令：
+PC寄存器（PC register）：PC寄存器需要记录下每个正在运行的java线程运行的当前指令的位置。
+JVM栈（JVM stack）：每个线程都会申请一个栈用来保存本地变量、方法参数以及返回值。下图展示了3个线程的栈区。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/jvm_stacks.png" alt="jvm stacks" /></p>
+      </li>
+    </ul>
+  </li>
+</ol>
+
+<p>堆区（Heap）：所有线程共享的用来存储对象（类实例和数组）的内存区域。对象的释放通过垃圾收集器来管理。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/heap.png" alt="heap" /></p>
+
+<p>方法区（Method area）：对于每个被加载的类来说，这里保存了类的方法代码和符号表（比如方法和字段的引用）以及常量池。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/method_area.png" alt="method_area" /></p>
+
+<p>JVM栈由帧组成，每当方法调用的时候会push一个帧到栈中，不管方式是正常退出还是异常退出，当方法结束的时候都会将帧从栈中pop出来。每一帧由以下部分组成：
+	1. 一个下标从0到长度-1数组的本地变量。数组的长度由编译器提前计算好。一个变量可以可以存储任何类型的值，除了long和double类型的值，因为它们占据两个本地变量的位置。
+	2. 一个操作数栈用来存储操作数指令的中间值或方法调用的参数引用。</p>
+
+<p><img src="/assets/img/Introduction_to_Java_Bytecode/stack_frame_zoom.png" alt="stack_frame_zoom" /></p>
+
+<h2 id="字节码探索">字节码探索</h2>
+<p>我们通过一些简单代码生成的基础字节码示例来查看JVM内部的一些设计。Java类文件里每个方法都有由一些指令组成的代码块，其遵循以下格式：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="n">opcode</span><span class="o">(</span><span class="mi">1</span> <span class="kt">byte</span><span class="o">)</span>	<span class="n">oprand1</span><span class="o">(</span><span class="n">optional</span><span class="o">)</span>	<span class="n">operand2</span><span class="o">(</span><span class="n">optional</span><span class="o">)</span>	</code></pre></figure>
+
+<p>这条指令包含1位的操作码(opcode) 和 零或多个要操作的数据组成的操作数(operands)。<br />
+在当前执行的方法栈帧种，一个指令可以push或者pop一个数据到操作数栈中，并且这个指令可以隐式的从本地变量数组中读取或者存储数据，下面我们看一个例子：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">STring</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+	<span class="kt">int</span> <span class="n">a</span> <span class="o">=</span> <span class="mi">1</span><span class="o">;</span>
+	<span class="kt">int</span> <span class="n">b</span> <span class="o">=</span> <span class="mi">2</span><span class="o">;</span>
+	<span class="kt">int</span> <span class="n">c</span> <span class="o">=</span> <span class="n">a</span> <span class="o">+</span> <span class="n">b</span><span class="o">;</span>
+<span class="o">}</span></code></pre></figure>
+
+<p>,我们可以运行javap 工具，在命令行打印出编译后的字节码结果(Test.class就是上面那段代码的编译后class文件)：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="n">javap</span> <span class="o">-</span><span class="n">v</span> <span class="nc">Test</span><span class="o">.</span><span class="na">class</span></code></pre></figure>
+
+<p>然后我们就可以看到下面的字节码：</p>
+
+<figure class="highlight"><pre><code class="language-bytecode" data-lang="bytecode">...
+  public static void main(java.lang.String[]);
+    descriptor: ([Ljava/lang/String;)V
+    flags: (0x0009) ACC_PUBLIC, ACC_STATIC
+    Code:
+      stack=2, locals=4, args_size=1
+         0: iconst_1
+         1: istore_1
+         2: iconst_2
+         3: istore_2
+         4: iload_1
+         5: iload_2
+         6: iadd
+         7: istore_3
+         8: return
+...</code></pre></figure>
+
+<p>我们可以看到main方法的方法签名，一个描述符(descriptor)表明这个方法接受一个String数组([Ljava/lang/String;),并且有一个void的返回类型(V),描述符下面跟着一系列的标签，标志这个方法是public(ACC_PUBLIC)和static(ACC_STATIC).<br />
+这里面最重要的一部分是code 的属性，这些属性包含方法的指令信息，比如操作数栈的最大深度(这个例子中为2, stack),和这个方法帧本地变量分配的数量(这里例子中为4, locals)，这里本地变量为4，其中0位置已经存放了方法参数args的引用，其他3个位置分别表示a、b、c 3个变量，后面我也可以看到istore_1是从1开始的。
+地址从0到8的指令有以下：<br />
+iconst_1：将一个integer 常量1 push到操作数栈中。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/iconst_12.png" alt="iconst_12" /></p>
+
+<p>istore_1：从操作数栈顶pop出一个值(一个int值)并且将这个值保存到下标为1的本地变量表数组中，这个值对应于源码中的变量a。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/istore_11.png" alt="istore_11" /></p>
+
+<p>iconst_2：将一个integer常量2 push到操作数栈中。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/iconst_2.png" alt="iconst_2" /></p>
+
+<p>istore_2：将操作数栈顶的int值pop出来并保存到下标为2的表本地变量数组中，这个值对应于源码中的变量b。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/istore_2.png" alt="istore_2" /></p>
+
+<p>iload_1：从本地变量数组中读取下标为1处位置的int值并且将读取出来的值push到操作数栈中。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/iload_1.png" alt="iload_1" /></p>
+
+<p>iload_2：从本地变量数组中读取下标为2的int值并将这个值push到操作数栈中。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/iload_2.png" alt="iload_2" /></p>
+
+<p>iadd：从操作数栈中pop出两个int 值，将这个两个值相加，并把这个相加的结果push回操作数栈中。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/iadd.png" alt="iadd" /></p>
+
+<p>istore_3：从操作数栈中pop出一个int值，将这个值存在本地变量数组中下标为3的位置，这个值对应于源码中的变量c。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/istore_3.png" alt="istore_3" /></p>
+
+<p>return：从void方法中返回
+上面的每条指令只由一个opccode组成，这些指令精确的说明了JVM要执行的操作。</p>
+
+<h2 id="方法调用method-invocations">方法调用（Method Invocations）</h2>
+<p>在上面(above)的例子中只有一个main方法。我们假设需要对变量c进行更加精确的计算,我们决定将这些计算放在一个叫calc的新方法里：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+	<span class="kt">int</span> <span class="n">a</span> <span class="o">=</span> <span class="mi">1</span><span class="o">;</span>
+	<span class="kt">int</span> <span class="n">b</span> <span class="o">=</span> <span class="mi">2</span><span class="o">;</span>
+	<span class="kt">int</span> <span class="n">c</span> <span class="o">=</span> <span class="n">calc</span><span class="o">(</span><span class="n">a</span><span class="o">,</span> <span class="n">b</span><span class="o">);</span>
+<span class="o">}</span>
+
+<span class="kd">public</span> <span class="kd">static</span> <span class="kt">int</span> <span class="nf">calc</span><span class="o">(</span><span class="kt">int</span> <span class="n">a</span><span class="o">,</span> <span class="kt">int</span> <span class="n">b</span><span class="o">)</span> <span class="o">{</span>
+	<span class="k">return</span> <span class="o">(</span><span class="kt">int</span><span class="o">)</span> <span class="nc">Math</span><span class="o">.</span><span class="na">sqrt</span><span class="o">(</span><span class="nc">Math</span><span class="o">.</span><span class="na">pow</span><span class="o">(</span><span class="n">a</span><span class="o">,</span> <span class="mi">2</span><span class="o">)</span> <span class="o">+</span> <span class="nc">Math</span><span class="o">.</span><span class="na">pow</span><span class="o">(</span><span class="n">b</span><span class="o">,</span> <span class="mi">2</span><span class="o">));</span>
+<span class="o">}</span></code></pre></figure>
+
+<p>下面看看字节码的结果：</p>
+
+<figure class="highlight"><pre><code class="language-bytecode" data-lang="bytecode">public static void main(java.lang.String[]);
+    descriptor: ([Ljava/lang/String;)V
+    flags: (0x0009) ACC_PUBLIC, ACC_STATIC
+    Code:
+      stack=2, locals=4, args_size=1
+         0: iconst_1
+         1: istore_1
+         2: iconst_2
+         3: istore_2
+         4: iload_1
+         5: iload_2
+         6: invokestatic  #2                  // 
+		 
+		 
+		 Method calc:(II)I
+	     9: istore_3
+	    10: return
+	  LineNumberTable:
+	    line 3: 0
+	    line 4: 2
+	    line 5: 4
+	    line 6: 10
+
+  public static int calc(int, int);
+    descriptor: (II)I
+    flags: (0x0009) ACC_PUBLIC, ACC_STATIC
+    Code:
+      stack=6, locals=2, args_size=2
+         0: iload_0
+         1: i2d
+         2: ldc2_w        #3                  // double 2.0d
+         5: invokestatic  #5                  // Method java/lang/Math.pow:(DD)D
+         8: iload_1
+         9: i2d
+        10: ldc2_w        #3                  // double 2.0d
+        13: invokestatic  #5                  // Method java/lang/Math.pow:(DD)D
+        16: dadd
+        17: invokestatic  #6                  // Method java/lang/Math.sqrt:(D)D
+        20: d2i
+        21: ireturn
+      LineNumberTable:
+        line 9: 0
+}</code></pre></figure>
+
+<p>main方法里的唯一不同地方是原来的iadd指令替换为了invokestatic 指令，这个指令简单的调用了静态的calc方法。需要注意的关键的地方是操作数栈中包含了要传入calc方法的两个参数。换句话说，正在执行的方法通过正确的顺序将参数push入操作数栈为要被调用的方法准备所有参数， invokestatic指令随后会pop出这些参数，然后为调用的方法创建一个新的栈帧，将这些参数放入这个栈帧的本地变量数组中。<br />
+通过查看地址从6到9我们同样注意到invokestatic指令分配了3字节，这是因为，不像到目前为止看到的所有指令, invokestatic指令包括两个额外的字节用来构造被调用方法的引用(不包括操作数)，这个引用被javap展示为#2，这是从前面描述的常量池中解析出来的一个执行calc方法的引用符号。
+其他的新信息就很明显的是calc方法的代码。首先load操作数栈的第一个int参数(iload_0).下一个指令 i2d,将int数转换为double。这个double结果将会被替换到操作数栈的栈顶，可以理解为把原来的int出栈，转成double再入栈。
+下一个指令push一个double常量 2.0d (从常量池获取的)到操作数栈。之后使用目前为止准备的两个操作数调用静态方法Math.pow(calc方法的第一个参数和2.0d常量)。当Math.pow方法返回，这个方法的返回值将会存储到调用者的操作数栈中，这个插图如下：</p>
+
+<p><img src="/assets/img/Introduction_to_Java_Bytecode/math_pow2.png" alt="math_pow2" /></p>
+
+<p>Math.pow(b, 2)是相同的流程：<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/math_pow21.png" alt="math_pow21" /></p>
+
+<p>下一个指令, dadd, pop出两个中间结果，将他们加起来， 然后将他们的和push回栈顶。最后， invokestatic 用求和的结果调用Math.sqrt方法，然后使用缩小转换(d2i)将返回值(Math.sqrt方法的返回值)从double转换为int.这个int结果返回给main方法并保存到C变量(istore_3).</p>
+<h2 id="创建实例instance-creations">创建实例（Instance Creations）</h2>
+<p>让我们修改一下例子，引入一个封装xy坐标的point类。</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">Test</span> <span class="o">{</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">Point</span> <span class="n">a</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Point</span><span class="o">(</span><span class="mi">1</span><span class="o">,</span> <span class="mi">1</span><span class="o">);</span>
+        <span class="nc">Point</span> <span class="n">b</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Point</span><span class="o">(</span><span class="mi">5</span><span class="o">,</span> <span class="mi">3</span><span class="o">);</span>
+        <span class="kt">int</span> <span class="n">c</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="na">area</span><span class="o">(</span><span class="n">b</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+<span class="kd">class</span> <span class="nc">Point</span> <span class="o">{</span>
+    <span class="kt">int</span> <span class="n">x</span><span class="o">,</span> <span class="n">y</span><span class="o">;</span>
+    <span class="nc">Point</span><span class="o">(</span><span class="kt">int</span> <span class="n">x</span><span class="o">,</span> <span class="kt">int</span> <span class="n">y</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">this</span><span class="o">.</span><span class="na">x</span> <span class="o">=</span> <span class="n">x</span><span class="o">;</span>
+        <span class="k">this</span><span class="o">.</span><span class="na">y</span> <span class="o">=</span> <span class="n">y</span><span class="o">;</span>
+    <span class="o">}</span>
+    <span class="kd">public</span> <span class="kt">int</span> <span class="nf">area</span><span class="o">(</span><span class="nc">Point</span> <span class="n">b</span><span class="o">)</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">length</span> <span class="o">=</span> <span class="nc">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">b</span><span class="o">.</span><span class="na">y</span> <span class="o">-</span> <span class="k">this</span><span class="o">.</span><span class="na">y</span><span class="o">);</span>
+        <span class="kt">int</span> <span class="n">width</span> <span class="o">=</span> <span class="nc">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">b</span><span class="o">.</span><span class="na">x</span> <span class="o">-</span> <span class="k">this</span><span class="o">.</span><span class="na">x</span><span class="o">);</span>
+        <span class="k">return</span> <span class="n">length</span> <span class="o">*</span> <span class="n">width</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span></code></pre></figure>
+
+<p>main方法编译后的字节码展示如下：</p>
+
+<figure class="highlight"><pre><code class="language-bytecode" data-lang="bytecode">public static void main(java.lang.String[]);
+  descriptor: ([Ljava/lang/String;)V
+  flags: (0x0009) ACC_PUBLIC, ACC_STATIC
+  Code:
+    stack=4, locals=4, args_size=1
+       0: new           #2       // class test/Point
+       3: dup
+       4: iconst_1
+       5: iconst_1
+       6: invokespecial #3       // Method test/Point."&lt;init&gt;":(II)V
+       9: astore_1
+      10: new           #2       // class test/Point
+      13: dup
+      14: iconst_5
+      15: iconst_3
+      16: invokespecial #3       // Method test/Point."&lt;init&gt;":(II)V
+      19: astore_2
+      20: aload_1
+      21: aload_2
+      22: invokevirtual #4       // Method test/Point.area:(Ltest/Point;)I
+      25: istore_3
+      26: return</code></pre></figure>
+
+<p>这里面遇到的新指令有：new, dup, invokespecial. 和编程语言里的new操作类似，new指令创建一个指定类型的对象的操作数(这是一个指向point类的符号引用)。对象在堆中申请分配内存，并且将一个指定该对象的引用push到从操作数栈中。<br />
+dup指令复制(duplicate)操作数栈顶的值，这意味着现在在栈顶有两个Point对象的引用，接下来的三个指令将构造函数(用来初始化对象)的参数push到操作数栈中，之后调用指定的初始化(init)方法,这个方法其实就是对应类的构造器。dup出来的引用表明哪里的x和y会被初始化。方法结束之后，操作数栈顶的三个值被消费，最后只保留了一个创建对象的源引用(目前为止，对象初始化完成)。
+<img src="/assets/img/Introduction_to_Java_Bytecode/init.png" alt="init" /></p>
+
+<p>下一步，astore_1指令从操作数栈中pop出Point的引用并将其分配到本地变量数组的下标1位置(astore_1中的a表明这是一个引用值)。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/init_store.png" alt="init_store" /></p>
+
+<p>创建和初始化第二个Point重复了一样的流程,这个对象被分配到b变量。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/init2.png" alt="init2" /><img src="/assets/img/Introduction_to_Java_Bytecode/init_store2.png" alt="init_store2" /></p>
+
+<p>最后一步从本地变量数组的1-2位置读取两个Point对象的引用(分别使用aload_1和aload_2指令),然后使用invokevirtual指令调用area方法，这个指令基于实际对象的类型来处理分发适当方法的调用,例如：如果变量a包含了一个继承自Point的SpecialPoint类型的实例，这个子类型override了area方法，这时这个重写的方法会被调用，在这个例子中，没有子类型，因此只有一个area方法是有效的。<br />
+<img src="/assets/img/Introduction_to_Java_Bytecode/area2.png" alt="area2" /></p>
+
+<p>需要注意的是，即使area方法接受了一个参数，操作数栈顶有两个Point类型的引用，第一个引用(pointA,来自变量a)是实际方法的调用(在编程语言中也称为this)，之后这个引用会被放到area方法的新的栈帧中的本地变量数组的第一个位置，另一个操作数值(pointB)作为area方法的参数。</p>
+
+<h2 id="另一种方式the-other-way-around">另一种方式(The Other Way Around)</h2>
+<p>你不需要根据手头的字节码来理解每条指令和精确的执行流程来获取程序做了什么，例如：我想要检查是否用java流来读取文件以及这个流是否正确的关闭。现在给了以下的字节码，这些字节码相对简单确定一个流被使用以及它子try-with-resources块之后被关闭。</p>
+
+<figure class="highlight"><pre><code class="language-bytecode" data-lang="bytecode">public static void main(java.lang.String[]) throws java.lang.Exception;
+ descriptor: ([Ljava/lang/String;)V
+ flags: (0x0009) ACC_PUBLIC, ACC_STATIC
+ Code:
+   stack=2, locals=8, args_size=1
+      0: ldc           #2                  // class test/Test
+      2: ldc           #3                  // String input.txt
+      4: invokevirtual #4                  // Method java/lang/Class.getResource:(Ljava/lang/String;)Ljava/net/URL;
+      7: invokevirtual #5                  // Method java/net/URL.toURI:()Ljava/net/URI;
+     10: invokestatic  #6                  // Method java/nio/file/Paths.get:(Ljava/net/URI;)Ljava/nio/file/Path;
+     13: astore_1
+     14: new           #7                  // class java/lang/StringBuilder
+     17: dup
+     18: invokespecial #8                  // Method java/lang/StringBuilder."&lt;init&gt;":()V
+     21: astore_2
+     22: aload_1
+     23: invokestatic  #9                  // Method java/nio/file/Files.lines:(Ljava/nio/file/Path;)Ljava/util/stream/Stream;
+     26: astore_3
+     27: aconst_null
+     28: astore        4
+     30: aload_3
+     31: aload_2
+     32: invokedynamic #10,  0             // InvokeDynamic #0:accept:(Ljava/lang/StringBuilder;)Ljava/util/function/Consumer;
+     37: invokeinterface #11,  2           // InterfaceMethod java/util/stream/Stream.forEach:(Ljava/util/function/Consumer;)V
+     42: aload_3
+     43: ifnull        131
+     46: aload         4
+     48: ifnull        72
+     51: aload_3
+     52: invokeinterface #12,  1           // InterfaceMethod java/util/stream/Stream.close:()V
+     57: goto          131
+     60: astore        5
+     62: aload         4
+     64: aload         5
+     66: invokevirtual #14                 // Method java/lang/Throwable.addSuppressed:(Ljava/lang/Throwable;)V
+     69: goto          131
+     72: aload_3
+     73: invokeinterface #12,  1           // InterfaceMethod java/util/stream/Stream.close:()V
+     78: goto          131
+     81: astore        5
+     83: aload         5
+     85: astore        4
+     87: aload         5
+     89: athrow
+     90: astore        6
+     92: aload_3
+     93: ifnull        128
+     96: aload         4
+     98: ifnull        122
+    101: aload_3
+    102: invokeinterface #12,  1           // InterfaceMethod java/util/stream/Stream.close:()V
+    107: goto          128
+    110: astore        7
+    112: aload         4
+    114: aload         7
+    116: invokevirtual #14                 // Method java/lang/Throwable.addSuppressed:(Ljava/lang/Throwable;)V
+    119: goto          128
+    122: aload_3
+    123: invokeinterface #12,  1           // InterfaceMethod java/util/stream/Stream.close:()V
+    128: aload         6
+    130: athrow
+    131: getstatic     #15                 // Field java/lang/System.out:Ljava/io/PrintStream;
+    134: aload_2
+    135: invokevirtual #16                 // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+    138: invokevirtual #17                 // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+    141: return
+   ...</code></pre></figure>
+
+<p>我们可以看到java/util/stream/Stream的forEach被调用之前的时候发生的事，调用InvokeDynamic指令的时候传入一个Consumer参数。之后我们可以看到紧接着Throwable.addSuppressed被调用之后的Stream.close字节码块。这是try-with-resources块编译后生成的基础代码。
+下面是字节码的源码：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">Exception</span> <span class="o">{</span>
+    <span class="nc">Path</span> <span class="n">path</span> <span class="o">=</span> <span class="nc">Paths</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="nc">Test</span><span class="o">.</span><span class="na">class</span><span class="o">.</span><span class="na">getResource</span><span class="o">(</span><span class="s">"input.txt"</span><span class="o">).</span><span class="na">toURI</span><span class="o">());</span>
+    <span class="nc">StringBuilder</span> <span class="n">data</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">StringBuilder</span><span class="o">();</span>
+    <span class="k">try</span><span class="o">(</span><span class="nc">Stream</span> <span class="n">lines</span> <span class="o">=</span> <span class="nc">Files</span><span class="o">.</span><span class="na">lines</span><span class="o">(</span><span class="n">path</span><span class="o">))</span> <span class="o">{</span>
+        <span class="n">lines</span><span class="o">.</span><span class="na">forEach</span><span class="o">(</span><span class="n">line</span> <span class="o">-&gt;</span> <span class="n">data</span><span class="o">.</span><span class="na">append</span><span class="o">(</span><span class="n">line</span><span class="o">).</span><span class="na">append</span><span class="o">(</span><span class="s">"\n"</span><span class="o">));</span>
+    <span class="o">}</span>
+    <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">toString</span><span class="o">());</span>
+<span class="o">}</span></code></pre></figure>
+
+<h2 id="结论conslusion">结论（conslusion）</h2>
+<p>得益于字节码指令集的简单以及生成字节码的时候几乎没有什么编译器优化，使得在没有源码的情况下来查看类文件称为一种可能。</p>
+
+<p>本人水平有限，如果有不足的地方，欢迎各位大佬点击左边加我的联系方式一起讨论。</p>
+:ET
