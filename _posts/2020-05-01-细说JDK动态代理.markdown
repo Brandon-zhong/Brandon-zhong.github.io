@@ -1,0 +1,260 @@
+---
+layout: post
+title: 细说JDK动态代理
+date: 2020-05-01 16:03:45
+description: 代理模式大家应该很清楚了吧，这里就默认大家都明白了代理模式，代理分两种：静态代理和动态代理。. # Add post description (optional)
+img-folder: stalk_aboud_jdk_dynamic_proxy # 本文章里涉及图片的文件夹
+img: talk_aboud_jdk_dynamic_proxy/software.jpg # Add image post (optional)
+tags: [Proxy, JDK] # add tag
+---
+
+代理模式大家应该很清楚了吧，这里就默认大家都明白了代理模式，代理分两种：静态代理和动态代理。静态代理很简单，就是自己创建代理类，然后将被代理的类传到代理类中，外层就调用代理类，实际运行的时候是被代理类做具体的操作。动态代理呢，目前主流的有两种，JDK动态代理和CGlib动态代理，这里讲一下JDK动态代理，CGlib 的先挖个坑，后面再填。
+
+这里直接上代码：
+{% highlight Java %}
+//代理操作类，实现了InvocationHandler接口
+public class DemoHandler implements InvocationHandler {
+
+	private Demo demo;
+	
+	public DemoHandler(Demo demo) {
+		this.demo = demo;
+	}
+	
+	//这里调用要代理的类，并做一些增强处理
+	@Override
+	public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+		System.out.println("DemoHandler.invoke -- before");
+		demo.doSomeThing();
+		System.out.println("DemoHandler.invoke -- after");
+		return null;
+	}
+
+}
+
+//这里是被代理类的接口
+public interface Demo {
+	void doSomeThing();
+}
+
+//这是被代理类的实现类，也就是我们实际操作逻辑的类
+public class DemoImpl implements Demo {
+	@Override
+	public void doSomeThing() {
+		System.out.println("this is demo!");
+	}
+}
+{% endhighlight %}
+
+上面的代码中，首先定义了一个被代理类的接口Demo，以及一个实现了被代理接口有实际操作逻辑的实现类，这个实现类里就是我们一些业务操作。然后我们需要在不改变原代码的基础上对这些业务操作做一些增强处理，比如调用方法前和调用方法后打印一下日志。这里我们就将这个增强操作放到代理操作类中来完成，也就是实现了InvocationHandler接口的DemoHandler类，接口里只有一个方法invoke()，我们将业务操作的类在handler类构造的时候传入进去，然后在invoke方法中做增强处理，可以看上面的代码。
+ok，到目前为止，我们就写好了业务逻辑，以及业务逻辑相应的增强，那这个时候有同学就会问了，即使组合到一起，那也是一个` DemoHandler demoHandler = new DemoHandler(new DemoImpl()); `对象啊，我们外层可是要用Demo对象的。不要急，还没写完呢，这里拿到的Handler对象中已经包含了增强操作以及被代理的对象，我们就只要再创建一个Demo对象将Handler对象再包装一下就好了，这里的这个操作就交给JDK来操作了，JDK会生成对应的类，我们只要指定Demo接口，再给一个Handler对象就好了，具体代码如下：
+{% highlight Java %}
+public class JDKProxy {
+    public static void main(String[] args) {
+        DemoHandler demoHandler = new DemoHandler(new DemoImpl());
+        Demo demoProxy = (Demo) Proxy.newProxyInstance(JDKProxy.class.getClassLoader(), new Class[]{Demo.class}, demoHandler);
+        demoProxy.doSomeThing();
+    }
+}
+{% endhighlight %}
+Proxy.newProxyInstance方法接收一个classLoader，接口数组以及一个handler对象，然后生成的出来的对象就是一个包装了handler对象的Demo对象，内部调用了handler对象的invoke方法。因为是JDK直接字节码生成的类，所以类信息默认都是在内存中，不会保存在磁盘上，不过我们可以在启动的增加参数来保存JDK生成的类文件。
+查看ProxyGenerator类的saveGeneratedFiles属性，这个boolean就是是否保存生成的类文件，可以看到这个属性是读取了sun.misc.ProxyGenerator.saveGeneratedFiles这个参数的值，也即使我们只要在启动的时候把这个参数设置为true就可以了，需要注意的是，我这里的JDK版本是1.8的，更高版本的这个参数命名可能不同，具体的可以自己查看这个属性的取值参数，使用开发工具全局搜索ProxyGenerator类，比如IDEA双击shift输入类名就可以搜索到了。
+{% highlight Java %}
+private static final boolean saveGeneratedFiles = (Boolean)AccessController.doPrivileged(new GetBooleanAction("sun.misc.ProxyGenerator.saveGeneratedFiles"));
+{% endhighlight %}
+这个例子的话就是运行以下命令
+
+```
+java -Dsun.misc.ProxyGenerator.saveGeneratedFiles=true JDKProxy
+```
+运行完成后就可以在当前目录(注意，如果你的接口是非公开的，那这个代理类会跟着接口的目录走，即会和接口在同一个包里，如果你的接口是公开的，那这个代理类则会在根目录的com/sun/proxy包下)下看到一个$Proxy0.class的类文件，这个就是JDK给我们生成的代理类文件，通过反编译工具反编译源码就可以看到以下源码：
+{% highlight Java %}
+final class $Proxy0 extends Proxy implements Demo {
+    private static Method m3;
+
+    public $Proxy0(InvocationHandler var1) throws  {
+        super(var1);
+    }
+    
+    public final void doSomeThing() throws  {
+        try {
+            super.h.invoke(this, m3, (Object[])null);
+        } catch (RuntimeException | Error var2) {
+            throw var2;
+        } catch (Throwable var3) {
+            throw new UndeclaredThrowableException(var3);
+        }
+    }
+    
+    static {
+            m3 = Class.forName("com.demo.proxy.JDKProxy$Demo").getMethod("doSomeThing");
+    }
+}
+{% endhighlight %}
+上面的代码我删除了一下非关键的代码(hashcode，equals，toString等方法)，不然会比较长，可以看到这个类继承Proxy类，实现了我们的Demo接口，构造器接受一个InvocationHandler参数，然后传到了super的构造器上，也就是Proxy类的Proxy(InvocationHandler h)构造器，实例构造好了之后，我们调用Demo接口方法doSomeThing的时候可以看到里面其实是调用的super.h.invoke()方法，这里的super.h对象就是Proxy(InvocationHandler h)构造器的参数InvocationHandler 实例。
+
+现在我们知道了Proxy创建的代理里里面其实是调用的InvocationHandler 对象的invoke方法，那我们的handler对象是怎么传到这个构造器里面的呢，这里我们就要看一下Proxy.newProxyInstance()方法了。
+
+{% highlight Java %}
+//构造器的参数类型
+private static final Class<?>[] constructorParams =
+        { InvocationHandler.class };
+
+public static Object newProxyInstance(ClassLoader loader,
+                                          Class<?>[] interfaces,
+                                          InvocationHandler h)
+        throws IllegalArgumentException
+    {
+        Objects.requireNonNull(h);
+
+        final Class<?>[] intfs = interfaces.clone();
+        final SecurityManager sm = System.getSecurityManager();
+        if (sm != null) {
+            checkProxyAccess(Reflection.getCallerClass(), loader, intfs);
+        }
+    
+        /*
+         * Look up or generate the designated proxy class.
+         */
+         //<1> 这里生成了我们的代理类class
+        Class<?> cl = getProxyClass0(loader, intfs);
+    
+        /*
+         * Invoke its constructor with the designated invocation handler.
+         */
+    	if (sm != null) {
+    		checkNewProxyPermission(Reflection.getCallerClass(), cl);
+    	}
+    
+    	//<2> 获取指定参数类型的构造器
+    	final Constructor<?> cons = cl.getConstructor(constructorParams);
+    	final InvocationHandler ih = h;
+    	if (!Modifier.isPublic(cl.getModifiers())) {
+    		AccessController.doPrivileged(new PrivilegedAction<Void>() {
+    			public Void run() {
+    				cons.setAccessible(true);
+    				return null;
+    			}
+    		});
+    	}
+    	//<3> 通过构造器反射创建代理类实例
+    	return cons.newInstance(new Object[]{h});
+    }
+{% endhighlight %}
+以上是newProxyInstance()方法的关键代码，可以看到  
+<1>位置就创建好了代理类的class，这里我们先不管这个class是怎么创建的，我们只要知道这个getProxyClass0方法传入一个ClassLoader和一个接口数组，返回一个继承了Proxy类和实现了数组内所有接口的class。  
+<2>位置去获取一个指定参数类型的构造器，这个constructorParams变量其实就是一个只有InvocationHandler.class元素的数组，也就是获取一个只有InvocationHandler类型参数的构造器，通过上面我们保存下反编译后的类文件发现，确实有一个这样的构造器。
+<3>位置就是通过获取的构造器，newProxyInstance()方法的InvocationHandler h参数传进去，然后新创建的Demo实例就获取到了我们自己创建的增强handler对象了。
+现在我们大概知道了JDK动态代理是怎么起作用的了，如果你只是想知道这些话，那看到这里应该就已经足够了，但是我们本着探索求真的态度，我们还可以深入看看这个代理字节码类是什么生成的？以及我如果多次Proxy.newProxyInstance()相同的参数，它会一直创建新的class么？那不是会有内存爆掉的风险么或者每次创建新的有没有性能上的问题，是不是就不提倡使用JDK动态代理了呢？，要解答这些问题，我们就要看看getProxyClass0()方法是怎么做的了。
+{% highlight Java %}
+ /**
+     * a cache of proxy classes
+     */
+     //<1>
+    private static final WeakCache<ClassLoader, Class<?>[], Class<?>>
+        proxyClassCache = new WeakCache<>(new KeyFactory(), new ProxyClassFactory());
+        
+private static Class<?> getProxyClass0(ClassLoader loader,
+                                           Class<?>... interfaces) {
+        if (interfaces.length > 65535) {
+            throw new IllegalArgumentException("interface limit exceeded");
+        }
+        return proxyClassCache.get(loader, interfaces);
+    }
+{% endhighlight %}
+其实只要你稍微看一下这段代码，你就可以解答第二个问题重复调用是否会一直创建新的class的问题，通过return处的proxyClassCache.get()方法，我们就知道这里用了一个缓存来保存生成的class，既然都有缓存了，那肯定不会一直创建新的class了，相同参数的话应该是会复用一个class的，不会每次都创建新的，只有第一次使用的时候创建，后面都使用缓存里的，直接获取，不存在重复构建的性能问题，另外，我们还可以看到proxyClassCache变量的类是WeakCache，这个时候，良好命名的好处就出来，这里单纯看类名不看类的实现，我们就大概知道，这个是一个基于弱引用(WeakReference)的弱引用缓存，如果你对弱引用(WeakReference)和弱引用在本地缓存中的应用还不太熟悉的话，可以参考我的另外一篇文章[软引用和弱引用在本地缓存中的应用]({% post_url 2020-04-14-软引用和弱引用在本地缓存中的应用 %}) ,由于这里我们不讲弱引用和缓存相关，这里我就直接告诉大家，这个class是有ProxyClassFactory类生成的，从上面代码段中<1>号位置应该可以看出WeakCache构造器需要一个KeyFactory和ProxyClassFactory对象作为参数，从名字上可以看出，KeyFactory是用来生成缓存的key 的，而ProxyClassFactory则是用来生成代理类的，其他的缓存相关我这里直接略过，直接进ProxyClassFactory类看看是怎么生成的，其他对缓存相关的同学可以自行查看。
+{% highlight Java %}
+// prefix for all proxy class names  这里是代理类类名的前缀
+        private static final String proxyClassNamePrefix = "$Proxy";
+        public Class<?> apply(ClassLoader loader, Class<?>[] interfaces) {
+        
+  // do something...
+        //这里循环拿到非公有类的包名并判断是否有不同包的非公有类
+	for (Class<?> intf : interfaces) {
+		int flags = intf.getModifiers();
+		if (!Modifier.isPublic(flags)) {
+			accessFlags = Modifier.FINAL;
+			String name = intf.getName();
+			int n = name.lastIndexOf('.');
+			String pkg = ((n == -1) ? "" : name.substring(0, n + 1));
+			if (proxyPkg == null) {
+				proxyPkg = pkg;
+			} else if (!pkg.equals(proxyPkg)) {
+				throw new IllegalArgumentException(
+					"non-public interfaces from different packages");
+			}
+		}
+	}
+
+//如果proxyPkg为空，说明所有的都是公有的接口，则使用默认的包名com.sun.proxy
+	if (proxyPkg == null) {
+		// if no non-public proxy interfaces, use com.sun.proxy package
+		proxyPkg = ReflectUtil.PROXY_PACKAGE + ".";
+	}
+
+	/*
+	 * Choose a name for the proxy class to generate.
+	 */
+	 //生成类名，用的是上面的包名+代理类的类名前缀+生成类的序数
+	long num = nextUniqueNumber.getAndIncrement();
+	String proxyName = proxyPkg + proxyClassNamePrefix + num;
+	
+	/*
+	 * Generate the specified proxy class.
+	 */
+	 //这里根据上面获取的信息，正式生成类信息，得到一个包含类信息的字节数组
+	byte[] proxyClassFile = ProxyGenerator.generateProxyClass(proxyName, interfaces, accessFlags);
+		//这是一个native方法，不过上面已经把类信息生成为字节数组的形式，这个方法的作用应该就是讲这个字节数组真正变成一个class并load进内存
+	return defineClass0(loader, proxyName,proxyClassFile, 0, proxyClassFile.length);
+}
+{% endhighlight %}
+上面代码里，值保留了一些我们感兴趣的关键的代码，比如代理类的类名是怎么生成的，类信息是怎么生成的之类的。我都写了注释，这里就不再赘述。我们来看更为关键的ProxyGenerator.generateProxyClass()是怎么生成的类信息字节数组的。
+{% highlight Java %}
+//<1>这里从指定变量中读取Boolean值
+private static final boolean saveGeneratedFiles = (Boolean)AccessController.doPrivileged(new GetBooleanAction("sun.misc.ProxyGenerator.saveGeneratedFiles"));
+//这个方法就是生成类信息字节数组
+public static byte[] generateProxyClass(final String var0, Class<?>[] var1, int var2) {
+//<2>这里是创建代理生成器，请生成代理类的相关信息
+        ProxyGenerator var3 = new ProxyGenerator(var0, var1, var2);
+        final byte[] var4 = var3.generateClassFile();
+        //<3>在这里可以看到，要不要将这个类信息保存成文件，主要看saveGeneratedFiles这个Boolean值，也就是上面读取指定变量的值
+        if (saveGeneratedFiles) {
+           //将类信息写入class文件中，这里不看这块代码，只要知道功能就行，不用太关注
+        }
+
+        return var4;
+    }
+{% endhighlight %}
+当就上面的代码，应该就可以看到我们设置的是否保存类信息到文件是怎么起作用的了
+<1>位置的saveGeneratedFiles变量读取了环境变量的sun.misc.ProxyGenerator.saveGeneratedFiles这个参数的值，也就是我们只要把这个变量设置成true，后面的代码的if判断就会通过并把类信息写到文件中保存起来，这个值可用在启动JVM的时候通过-D参数传入进去，也可以在代码中通过System.setProperties()方法设置，两种方式都是一样的效果
+<2>位置就是真正生成类信息的代码，这里面的代码非常复杂，需要对字节码的结构比较了解才能看得懂，如果你对字节码的结构不太了解的话，可以查看我的另外一篇文章{% post_url 2019-11-02-字节码是如何工作的 %}，而且里面的变量名称都是var数字格式的,没法做到见名知意的，看的头都大了，可能作者当时写的时候就没想让上层开发人员去良好的阅读这个功能的吧，哈哈哈，碍于篇幅所限，我这里就只贴一小部分简单的代码，剩下的你还有兴趣的话欢迎加我联系方式一起研究哈。
+{% highlight Java %}
+private byte[] generateClassFile() {
+	//添加代理方法，Object的hashcode、equal、toString三个方法
+	this.addProxyMethod(hashCodeMethod, Object.class);
+	this.addProxyMethod(equalsMethod, Object.class);
+	this.addProxyMethod(toStringMethod, Object.class);
+	
+	Class[] var1 = this.interfaces;
+	int var2 = var1.length;
+	
+	int var3;
+	Class var4;
+	//遍历添加接口数组中的方法
+	for(var3 = 0; var3 < var2; ++var3) {
+		var4 = var1[var3];
+		//获取接口中的所有方法
+		Method[] var5 = var4.getMethods();
+		int var6 = var5.length;
+		//将接口中的所有方便遍历添加进去
+		for(int var7 = 0; var7 < var6; ++var7) {
+			Method var8 = var5[var7];
+			this.addProxyMethod(var8, var4);
+		}
+	}
+	//......
+}
+{% endhighlight %}
+上面的代码就是给代理类添加方法的实现，是不是很简单呢(屁嘞，里面只是简单校验并缓存起来而已，后面再统一取出来处理)，基本是只要是没有冲突，不太复杂的类关系，这里收集的方法后面都会加入到代理类中，所以也可以说这就是给代理类加方法的实现啦，吼吼吼。
+
+不知不觉已经写到这里了，上面的基本大概讲了一下JDK动态代理的运作已经大概实现了，本人水平有限，有错误的地方，欢迎添加我的联系方式给我指正。

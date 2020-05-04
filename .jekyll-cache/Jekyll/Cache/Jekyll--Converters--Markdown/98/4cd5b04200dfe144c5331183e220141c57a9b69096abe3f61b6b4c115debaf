@@ -1,0 +1,248 @@
+I"b�<p>代理模式大家应该很清楚了吧，这里就默认大家都明白了代理模式，代理分两种：静态代理和动态代理。静态代理很简单，就是自己创建代理类，然后将被代理的类传到代理类中，外层就调用代理类，实际运行的时候是被代理类做具体的操作。动态代理呢，目前主流的有两种，JDK动态代理和CGlib动态代理，这里讲一下JDK动态代理，CGlib 的先挖个坑，后面再填。</p>
+
+<p>这里直接上代码：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="c1">//代理操作类，实现了InvocationHandler接口</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">DemoHandler</span> <span class="kd">implements</span> <span class="nc">InvocationHandler</span> <span class="o">{</span>
+
+	<span class="kd">private</span> <span class="nc">Demo</span> <span class="n">demo</span><span class="o">;</span>
+	
+	<span class="kd">public</span> <span class="nf">DemoHandler</span><span class="o">(</span><span class="nc">Demo</span> <span class="n">demo</span><span class="o">)</span> <span class="o">{</span>
+		<span class="k">this</span><span class="o">.</span><span class="na">demo</span> <span class="o">=</span> <span class="n">demo</span><span class="o">;</span>
+	<span class="o">}</span>
+	
+	<span class="c1">//这里调用要代理的类，并做一些增强处理</span>
+	<span class="nd">@Override</span>
+	<span class="kd">public</span> <span class="nc">Object</span> <span class="nf">invoke</span><span class="o">(</span><span class="nc">Object</span> <span class="n">proxy</span><span class="o">,</span> <span class="nc">Method</span> <span class="n">method</span><span class="o">,</span> <span class="nc">Object</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="kd">throws</span> <span class="nc">Throwable</span> <span class="o">{</span>
+		<span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"DemoHandler.invoke -- before"</span><span class="o">);</span>
+		<span class="n">demo</span><span class="o">.</span><span class="na">doSomeThing</span><span class="o">();</span>
+		<span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"DemoHandler.invoke -- after"</span><span class="o">);</span>
+		<span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+	<span class="o">}</span>
+
+<span class="o">}</span>
+
+<span class="c1">//这里是被代理类的接口</span>
+<span class="kd">public</span> <span class="kd">interface</span> <span class="nc">Demo</span> <span class="o">{</span>
+	<span class="kt">void</span> <span class="nf">doSomeThing</span><span class="o">();</span>
+<span class="o">}</span>
+
+<span class="c1">//这是被代理类的实现类，也就是我们实际操作逻辑的类</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">DemoImpl</span> <span class="kd">implements</span> <span class="nc">Demo</span> <span class="o">{</span>
+	<span class="nd">@Override</span>
+	<span class="kd">public</span> <span class="kt">void</span> <span class="nf">doSomeThing</span><span class="o">()</span> <span class="o">{</span>
+		<span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"this is demo!"</span><span class="o">);</span>
+	<span class="o">}</span>
+<span class="o">}</span></code></pre></figure>
+
+<p>上面的代码中，首先定义了一个被代理类的接口Demo，以及一个实现了被代理接口有实际操作逻辑的实现类，这个实现类里就是我们一些业务操作。然后我们需要在不改变原代码的基础上对这些业务操作做一些增强处理，比如调用方法前和调用方法后打印一下日志。这里我们就将这个增强操作放到代理操作类中来完成，也就是实现了InvocationHandler接口的DemoHandler类，接口里只有一个方法invoke()，我们将业务操作的类在handler类构造的时候传入进去，然后在invoke方法中做增强处理，可以看上面的代码。
+ok，到目前为止，我们就写好了业务逻辑，以及业务逻辑相应的增强，那这个时候有同学就会问了，即使组合到一起，那也是一个<code class="highlighter-rouge"> DemoHandler demoHandler = new DemoHandler(new DemoImpl()); </code>对象啊，我们外层可是要用Demo对象的。不要急，还没写完呢，这里拿到的Handler对象中已经包含了增强操作以及被代理的对象，我们就只要再创建一个Demo对象将Handler对象再包装一下就好了，这里的这个操作就交给JDK来操作了，JDK会生成对应的类，我们只要指定Demo接口，再给一个Handler对象就好了，具体代码如下：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">JDKProxy</span> <span class="o">{</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="nc">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+        <span class="nc">DemoHandler</span> <span class="n">demoHandler</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">DemoHandler</span><span class="o">(</span><span class="k">new</span> <span class="nc">DemoImpl</span><span class="o">());</span>
+        <span class="nc">Demo</span> <span class="n">demoProxy</span> <span class="o">=</span> <span class="o">(</span><span class="nc">Demo</span><span class="o">)</span> <span class="nc">Proxy</span><span class="o">.</span><span class="na">newProxyInstance</span><span class="o">(</span><span class="nc">JDKProxy</span><span class="o">.</span><span class="na">class</span><span class="o">.</span><span class="na">getClassLoader</span><span class="o">(),</span> <span class="k">new</span> <span class="nc">Class</span><span class="o">[]{</span><span class="nc">Demo</span><span class="o">.</span><span class="na">class</span><span class="o">},</span> <span class="n">demoHandler</span><span class="o">);</span>
+        <span class="n">demoProxy</span><span class="o">.</span><span class="na">doSomeThing</span><span class="o">();</span>
+    <span class="o">}</span>
+<span class="o">}</span></code></pre></figure>
+
+<p>Proxy.newProxyInstance方法接收一个classLoader，接口数组以及一个handler对象，然后生成的出来的对象就是一个包装了handler对象的Demo对象，内部调用了handler对象的invoke方法。因为是JDK直接字节码生成的类，所以类信息默认都是在内存中，不会保存在磁盘上，不过我们可以在启动的增加参数来保存JDK生成的类文件。
+查看ProxyGenerator类的saveGeneratedFiles属性，这个boolean就是是否保存生成的类文件，可以看到这个属性是读取了sun.misc.ProxyGenerator.saveGeneratedFiles这个参数的值，也即使我们只要在启动的时候把这个参数设置为true就可以了，需要注意的是，我这里的JDK版本是1.8的，更高版本的这个参数命名可能不同，具体的可以自己查看这个属性的取值参数，使用开发工具全局搜索ProxyGenerator类，比如IDEA双击shift输入类名就可以搜索到了。</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="kt">boolean</span> <span class="n">saveGeneratedFiles</span> <span class="o">=</span> <span class="o">(</span><span class="nc">Boolean</span><span class="o">)</span><span class="nc">AccessController</span><span class="o">.</span><span class="na">doPrivileged</span><span class="o">(</span><span class="k">new</span> <span class="nc">GetBooleanAction</span><span class="o">(</span><span class="s">"sun.misc.ProxyGenerator.saveGeneratedFiles"</span><span class="o">));</span></code></pre></figure>
+
+<p>这个例子的话就是运行以下命令</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>java -Dsun.misc.ProxyGenerator.saveGeneratedFiles=true JDKProxy
+</code></pre></div></div>
+<p>运行完成后就可以在当前目录(注意，如果你的接口是非公开的，那这个代理类会跟着接口的目录走，即会和接口在同一个包里，如果你的接口是公开的，那这个代理类则会在根目录的com/sun/proxy包下)下看到一个$Proxy0.class的类文件，这个就是JDK给我们生成的代理类文件，通过反编译工具反编译源码就可以看到以下源码：</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="kd">final</span> <span class="kd">class</span> <span class="err">$</span><span class="nc">Proxy0</span> <span class="kd">extends</span> <span class="nc">Proxy</span> <span class="kd">implements</span> <span class="nc">Demo</span> <span class="o">{</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="nc">Method</span> <span class="n">m3</span><span class="o">;</span>
+
+    <span class="kd">public</span> <span class="n">$Proxy0</span><span class="o">(</span><span class="nc">InvocationHandler</span> <span class="n">var1</span><span class="o">)</span> <span class="kd">throws</span>  <span class="o">{</span>
+        <span class="kd">super</span><span class="o">(</span><span class="n">var1</span><span class="o">);</span>
+    <span class="o">}</span>
+    
+    <span class="kd">public</span> <span class="kd">final</span> <span class="kt">void</span> <span class="nf">doSomeThing</span><span class="o">()</span> <span class="kd">throws</span>  <span class="o">{</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="kd">super</span><span class="o">.</span><span class="na">h</span><span class="o">.</span><span class="na">invoke</span><span class="o">(</span><span class="k">this</span><span class="o">,</span> <span class="n">m3</span><span class="o">,</span> <span class="o">(</span><span class="nc">Object</span><span class="o">[])</span><span class="kc">null</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">RuntimeException</span> <span class="o">|</span> <span class="nc">Error</span> <span class="n">var2</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="n">var2</span><span class="o">;</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">Throwable</span> <span class="n">var3</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">UndeclaredThrowableException</span><span class="o">(</span><span class="n">var3</span><span class="o">);</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+    
+    <span class="kd">static</span> <span class="o">{</span>
+            <span class="n">m3</span> <span class="o">=</span> <span class="nc">Class</span><span class="o">.</span><span class="na">forName</span><span class="o">(</span><span class="s">"com.demo.proxy.JDKProxy$Demo"</span><span class="o">).</span><span class="na">getMethod</span><span class="o">(</span><span class="s">"doSomeThing"</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span></code></pre></figure>
+
+<p>上面的代码我删除了一下非关键的代码，不然会比较长，可以看到这个类继承Proxy类，实现了我们的Demo接口，构造器接受一个InvocationHandler参数，然后传到了super的构造器上，也就是Proxy类的Proxy(InvocationHandler h)构造器，实例构造好了之后，我们调用Demo接口方法doSomeThing的时候可以看到里面其实是调用的super.h.invoke()方法，这里的super.h对象就是Proxy(InvocationHandler h)构造器的参数InvocationHandler 实例。</p>
+
+<p>现在我们知道了Proxy创建的代理里里面其实是调用的InvocationHandler 对象的invoke方法，那我们的handler对象是怎么传到这个构造器里面的呢，这里我们就要看一下Proxy.newProxyInstance()方法了。</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="c1">//构造器的参数类型</span>
+<span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">Class</span><span class="o">&lt;?&gt;[]</span> <span class="n">constructorParams</span> <span class="o">=</span>
+        <span class="o">{</span> <span class="nc">InvocationHandler</span><span class="o">.</span><span class="na">class</span> <span class="o">};</span>
+
+<span class="kd">public</span> <span class="kd">static</span> <span class="nc">Object</span> <span class="nf">newProxyInstance</span><span class="o">(</span><span class="nc">ClassLoader</span> <span class="n">loader</span><span class="o">,</span>
+                                          <span class="nc">Class</span><span class="o">&lt;?&gt;[]</span> <span class="n">interfaces</span><span class="o">,</span>
+                                          <span class="nc">InvocationHandler</span> <span class="n">h</span><span class="o">)</span>
+        <span class="kd">throws</span> <span class="nc">IllegalArgumentException</span>
+    <span class="o">{</span>
+        <span class="nc">Objects</span><span class="o">.</span><span class="na">requireNonNull</span><span class="o">(</span><span class="n">h</span><span class="o">);</span>
+
+        <span class="kd">final</span> <span class="nc">Class</span><span class="o">&lt;?&gt;[]</span> <span class="n">intfs</span> <span class="o">=</span> <span class="n">interfaces</span><span class="o">.</span><span class="na">clone</span><span class="o">();</span>
+        <span class="kd">final</span> <span class="nc">SecurityManager</span> <span class="n">sm</span> <span class="o">=</span> <span class="nc">System</span><span class="o">.</span><span class="na">getSecurityManager</span><span class="o">();</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">sm</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+            <span class="n">checkProxyAccess</span><span class="o">(</span><span class="nc">Reflection</span><span class="o">.</span><span class="na">getCallerClass</span><span class="o">(),</span> <span class="n">loader</span><span class="o">,</span> <span class="n">intfs</span><span class="o">);</span>
+        <span class="o">}</span>
+    
+        <span class="cm">/*
+         * Look up or generate the designated proxy class.
+         */</span>
+         <span class="c1">//&lt;1&gt; 这里生成了我们的代理类class</span>
+        <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">cl</span> <span class="o">=</span> <span class="n">getProxyClass0</span><span class="o">(</span><span class="n">loader</span><span class="o">,</span> <span class="n">intfs</span><span class="o">);</span>
+    
+        <span class="cm">/*
+         * Invoke its constructor with the designated invocation handler.
+         */</span>
+    	<span class="k">if</span> <span class="o">(</span><span class="n">sm</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+    		<span class="n">checkNewProxyPermission</span><span class="o">(</span><span class="nc">Reflection</span><span class="o">.</span><span class="na">getCallerClass</span><span class="o">(),</span> <span class="n">cl</span><span class="o">);</span>
+    	<span class="o">}</span>
+    
+    	<span class="c1">//&lt;2&gt; 获取指定参数类型的构造器</span>
+    	<span class="kd">final</span> <span class="nc">Constructor</span><span class="o">&lt;?&gt;</span> <span class="n">cons</span> <span class="o">=</span> <span class="n">cl</span><span class="o">.</span><span class="na">getConstructor</span><span class="o">(</span><span class="n">constructorParams</span><span class="o">);</span>
+    	<span class="kd">final</span> <span class="nc">InvocationHandler</span> <span class="n">ih</span> <span class="o">=</span> <span class="n">h</span><span class="o">;</span>
+    	<span class="k">if</span> <span class="o">(!</span><span class="nc">Modifier</span><span class="o">.</span><span class="na">isPublic</span><span class="o">(</span><span class="n">cl</span><span class="o">.</span><span class="na">getModifiers</span><span class="o">()))</span> <span class="o">{</span>
+    		<span class="nc">AccessController</span><span class="o">.</span><span class="na">doPrivileged</span><span class="o">(</span><span class="k">new</span> <span class="nc">PrivilegedAction</span><span class="o">&lt;</span><span class="nc">Void</span><span class="o">&gt;()</span> <span class="o">{</span>
+    			<span class="kd">public</span> <span class="nc">Void</span> <span class="nf">run</span><span class="o">()</span> <span class="o">{</span>
+    				<span class="n">cons</span><span class="o">.</span><span class="na">setAccessible</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
+    				<span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+    			<span class="o">}</span>
+    		<span class="o">});</span>
+    	<span class="o">}</span>
+    	<span class="c1">//&lt;3&gt; 通过构造器反射创建代理类实例</span>
+    	<span class="k">return</span> <span class="n">cons</span><span class="o">.</span><span class="na">newInstance</span><span class="o">(</span><span class="k">new</span> <span class="nc">Object</span><span class="o">[]{</span><span class="n">h</span><span class="o">});</span>
+    <span class="o">}</span></code></pre></figure>
+
+<p>以上是newProxyInstance()方法的关键代码，可以看到<br />
+&lt;1&gt;位置就创建好了代理类的class，这里我们先不管这个class是怎么创建的，我们只要知道这个getProxyClass0方法传入一个ClassLoader和一个接口数组，返回一个继承了Proxy类和实现了数组内所有接口的class。<br />
+&lt;2&gt;位置去获取一个指定参数类型的构造器，这个constructorParams变量其实就是一个只有InvocationHandler.class元素的数组，也就是获取一个只有InvocationHandler类型参数的构造器，通过上面我们保存下反编译后的类文件发现，确实有一个这样的构造器。
+&lt;3&gt;位置就是通过获取的构造器，newProxyInstance()方法的InvocationHandler h参数传进去，然后新创建的Demo实例就获取到了我们自己创建的增强handler对象了。
+现在我们大概知道了JDK动态代理是怎么起作用的了，如果你只是想知道这些话，那看到这里应该就已经足够了，但是我们本着探索求真的态度，我们还可以深入看看这个代理字节码类是什么生成的？以及我如果多次Proxy.newProxyInstance()相同的参数，它会一直创建新的class么？那不是会有内存爆掉的风险么或者每次创建新的有没有性能上的问题，是不是就不提倡使用JDK动态代理了呢？，要解答这些问题，我们就要看看getProxyClass0()方法是怎么做的了。</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"> <span class="cm">/**
+     * a cache of proxy classes
+     */</span>
+     <span class="c1">//&lt;1&gt;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">WeakCache</span><span class="o">&lt;</span><span class="nc">ClassLoader</span><span class="o">,</span> <span class="nc">Class</span><span class="o">&lt;?&gt;[],</span> <span class="nc">Class</span><span class="o">&lt;?&gt;&gt;</span>
+        <span class="n">proxyClassCache</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">WeakCache</span><span class="o">&lt;&gt;(</span><span class="k">new</span> <span class="nc">KeyFactory</span><span class="o">(),</span> <span class="k">new</span> <span class="nc">ProxyClassFactory</span><span class="o">());</span>
+        
+<span class="kd">private</span> <span class="kd">static</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">getProxyClass0</span><span class="o">(</span><span class="nc">ClassLoader</span> <span class="n">loader</span><span class="o">,</span>
+                                           <span class="nc">Class</span><span class="o">&lt;?&gt;...</span> <span class="n">interfaces</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">interfaces</span><span class="o">.</span><span class="na">length</span> <span class="o">&gt;</span> <span class="mi">65535</span><span class="o">)</span> <span class="o">{</span>
+            <span class="k">throw</span> <span class="k">new</span> <span class="nf">IllegalArgumentException</span><span class="o">(</span><span class="s">"interface limit exceeded"</span><span class="o">);</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">proxyClassCache</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">loader</span><span class="o">,</span> <span class="n">interfaces</span><span class="o">);</span>
+    <span class="o">}</span></code></pre></figure>
+
+<p>其实只要你稍微看一下这段代码，你就可以解答第二个问题重复调用是否会一直创建新的class的问题，通过return处的proxyClassCache.get()方法，我们就知道这里用了一个缓存来保存生成的class，既然都有缓存了，那肯定不会一直创建新的class了，相同参数的话应该是会复用一个class的，不会每次都创建新的，只有第一次使用的时候创建，后面都使用缓存里的，直接获取，不存在重复构建的性能问题，另外，我们还可以看到proxyClassCache变量的类是WeakCache，这个时候，良好命名的好处就出来，这里单纯看类名不看类的实现，我们就大概知道，这个是一个基于弱引用(WeakReference)的弱引用缓存，如果你对弱引用(WeakReference)和弱引用在本地缓存中的应用还不太熟悉的话，可以参考我的另外一篇文章<a href="/%E8%BD%AF%E5%BC%95%E7%94%A8%E5%92%8C%E5%BC%B1%E5%BC%95%E7%94%A8%E5%9C%A8%E6%9C%AC%E5%9C%B0%E7%BC%93%E5%AD%98%E4%B8%AD%E7%9A%84%E5%BA%94%E7%94%A8/">软引用和弱引用在本地缓存中的应用</a> ,由于这里我们不讲弱引用和缓存相关，这里我就直接告诉大家，这个class是有ProxyClassFactory类生成的，从上面代码段中&lt;1&gt;号位置应该可以看出WeakCache构造器需要一个KeyFactory和ProxyClassFactory对象作为参数，从名字上可以看出，KeyFactory是用来生成缓存的key 的，而ProxyClassFactory则是用来生成代理类的，其他的缓存相关我这里直接略过，直接进ProxyClassFactory类看看是怎么生成的，其他对缓存相关的同学可以自行查看。</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="c1">// prefix for all proxy class names  这里是代理类类名的前缀</span>
+        <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">String</span> <span class="n">proxyClassNamePrefix</span> <span class="o">=</span> <span class="s">"$Proxy"</span><span class="o">;</span>
+        <span class="kd">public</span> <span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">apply</span><span class="o">(</span><span class="nc">ClassLoader</span> <span class="n">loader</span><span class="o">,</span> <span class="nc">Class</span><span class="o">&lt;?&gt;[]</span> <span class="n">interfaces</span><span class="o">)</span> <span class="o">{</span>
+        
+  <span class="c1">// do something...</span>
+        <span class="c1">//这里循环拿到非公有类的包名并判断是否有不同包的非公有类</span>
+	<span class="k">for</span> <span class="o">(</span><span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">intf</span> <span class="o">:</span> <span class="n">interfaces</span><span class="o">)</span> <span class="o">{</span>
+		<span class="kt">int</span> <span class="n">flags</span> <span class="o">=</span> <span class="n">intf</span><span class="o">.</span><span class="na">getModifiers</span><span class="o">();</span>
+		<span class="k">if</span> <span class="o">(!</span><span class="nc">Modifier</span><span class="o">.</span><span class="na">isPublic</span><span class="o">(</span><span class="n">flags</span><span class="o">))</span> <span class="o">{</span>
+			<span class="n">accessFlags</span> <span class="o">=</span> <span class="nc">Modifier</span><span class="o">.</span><span class="na">FINAL</span><span class="o">;</span>
+			<span class="nc">String</span> <span class="n">name</span> <span class="o">=</span> <span class="n">intf</span><span class="o">.</span><span class="na">getName</span><span class="o">();</span>
+			<span class="kt">int</span> <span class="n">n</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="na">lastIndexOf</span><span class="o">(</span><span class="sc">'.'</span><span class="o">);</span>
+			<span class="nc">String</span> <span class="n">pkg</span> <span class="o">=</span> <span class="o">((</span><span class="n">n</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="o">)</span> <span class="o">?</span> <span class="s">""</span> <span class="o">:</span> <span class="n">name</span><span class="o">.</span><span class="na">substring</span><span class="o">(</span><span class="mi">0</span><span class="o">,</span> <span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="o">));</span>
+			<span class="k">if</span> <span class="o">(</span><span class="n">proxyPkg</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+				<span class="n">proxyPkg</span> <span class="o">=</span> <span class="n">pkg</span><span class="o">;</span>
+			<span class="o">}</span> <span class="k">else</span> <span class="k">if</span> <span class="o">(!</span><span class="n">pkg</span><span class="o">.</span><span class="na">equals</span><span class="o">(</span><span class="n">proxyPkg</span><span class="o">))</span> <span class="o">{</span>
+				<span class="k">throw</span> <span class="k">new</span> <span class="nf">IllegalArgumentException</span><span class="o">(</span>
+					<span class="s">"non-public interfaces from different packages"</span><span class="o">);</span>
+			<span class="o">}</span>
+		<span class="o">}</span>
+	<span class="o">}</span>
+
+<span class="c1">//如果proxyPkg为空，说明所有的都是公有的接口，则使用默认的包名com.sun.proxy</span>
+	<span class="k">if</span> <span class="o">(</span><span class="n">proxyPkg</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+		<span class="c1">// if no non-public proxy interfaces, use com.sun.proxy package</span>
+		<span class="n">proxyPkg</span> <span class="o">=</span> <span class="nc">ReflectUtil</span><span class="o">.</span><span class="na">PROXY_PACKAGE</span> <span class="o">+</span> <span class="s">"."</span><span class="o">;</span>
+	<span class="o">}</span>
+
+	<span class="cm">/*
+	 * Choose a name for the proxy class to generate.
+	 */</span>
+	 <span class="c1">//生成类名，用的是上面的包名+代理类的类名前缀+生成类的序数</span>
+	<span class="kt">long</span> <span class="n">num</span> <span class="o">=</span> <span class="n">nextUniqueNumber</span><span class="o">.</span><span class="na">getAndIncrement</span><span class="o">();</span>
+	<span class="nc">String</span> <span class="n">proxyName</span> <span class="o">=</span> <span class="n">proxyPkg</span> <span class="o">+</span> <span class="n">proxyClassNamePrefix</span> <span class="o">+</span> <span class="n">num</span><span class="o">;</span>
+	
+	<span class="cm">/*
+	 * Generate the specified proxy class.
+	 */</span>
+	 <span class="c1">//这里根据上面获取的信息，正式生成类信息，得到一个包含类信息的字节数组</span>
+	<span class="kt">byte</span><span class="o">[]</span> <span class="n">proxyClassFile</span> <span class="o">=</span> <span class="nc">ProxyGenerator</span><span class="o">.</span><span class="na">generateProxyClass</span><span class="o">(</span><span class="n">proxyName</span><span class="o">,</span> <span class="n">interfaces</span><span class="o">,</span> <span class="n">accessFlags</span><span class="o">);</span>
+		<span class="c1">//这是一个native方法，不过上面已经把类信息生成为字节数组的形式，这个方法的作用应该就是讲这个字节数组真正变成一个class并load进内存</span>
+	<span class="k">return</span> <span class="nf">defineClass0</span><span class="o">(</span><span class="n">loader</span><span class="o">,</span> <span class="n">proxyName</span><span class="o">,</span><span class="n">proxyClassFile</span><span class="o">,</span> <span class="mi">0</span><span class="o">,</span> <span class="n">proxyClassFile</span><span class="o">.</span><span class="na">length</span><span class="o">);</span>
+<span class="o">}</span></code></pre></figure>
+
+<p>上面代码里，值保留了一些我们感兴趣的关键的代码，比如代理类的类名是怎么生成的，类信息是怎么生成的之类的。我都写了注释，这里就不再赘述。我们来看更为关键的ProxyGenerator.generateProxyClass()是怎么生成的类信息字节数组的。</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="c1">//&lt;1&gt;这里从指定变量中读取Boolean值</span>
+<span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="kt">boolean</span> <span class="n">saveGeneratedFiles</span> <span class="o">=</span> <span class="o">(</span><span class="nc">Boolean</span><span class="o">)</span><span class="nc">AccessController</span><span class="o">.</span><span class="na">doPrivileged</span><span class="o">(</span><span class="k">new</span> <span class="nc">GetBooleanAction</span><span class="o">(</span><span class="s">"sun.misc.ProxyGenerator.saveGeneratedFiles"</span><span class="o">));</span>
+<span class="c1">//这个方法就是生成类信息字节数组</span>
+<span class="kd">public</span> <span class="kd">static</span> <span class="kt">byte</span><span class="o">[]</span> <span class="nf">generateProxyClass</span><span class="o">(</span><span class="kd">final</span> <span class="nc">String</span> <span class="n">var0</span><span class="o">,</span> <span class="nc">Class</span><span class="o">&lt;?&gt;[]</span> <span class="n">var1</span><span class="o">,</span> <span class="kt">int</span> <span class="n">var2</span><span class="o">)</span> <span class="o">{</span>
+<span class="c1">//&lt;2&gt;这里是创建代理生成器，请生成代理类的相关信息</span>
+        <span class="nc">ProxyGenerator</span> <span class="n">var3</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ProxyGenerator</span><span class="o">(</span><span class="n">var0</span><span class="o">,</span> <span class="n">var1</span><span class="o">,</span> <span class="n">var2</span><span class="o">);</span>
+        <span class="kd">final</span> <span class="kt">byte</span><span class="o">[]</span> <span class="n">var4</span> <span class="o">=</span> <span class="n">var3</span><span class="o">.</span><span class="na">generateClassFile</span><span class="o">();</span>
+        <span class="c1">//&lt;3&gt;在这里可以看到，要不要将这个类信息保存成文件，主要看saveGeneratedFiles这个Boolean值，也就是上面读取指定变量的值</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">saveGeneratedFiles</span><span class="o">)</span> <span class="o">{</span>
+           <span class="c1">//将类信息写入class文件中，这里不看这块代码，只要知道功能就行，不用太关注</span>
+        <span class="o">}</span>
+
+        <span class="k">return</span> <span class="n">var4</span><span class="o">;</span>
+    <span class="o">}</span></code></pre></figure>
+
+<p>当就上面的代码，应该就可以看到我们设置的是否保存类信息到文件是怎么起作用的了
+&lt;1&gt;位置的saveGeneratedFiles变量读取了环境变量的sun.misc.ProxyGenerator.saveGeneratedFiles这个参数的值，也就是我们只要把这个变量设置成true，后面的代码的if判断就会通过并把类信息写到文件中保存起来，这个值可用在启动JVM的时候通过-D参数传入进去，也可以在代码中通过System.setProperties()方法设置，两种方式都是一样的效果
+&lt;2&gt;位置就是真正生成类信息的代码，这里面的代码非常复杂，需要对字节码的结构比较了解才能看得懂，如果你对字节码的结构不太了解的话，可以查看我的另外一篇文章/%E5%AD%97%E8%8A%82%E7%A0%81%E6%98%AF%E5%A6%82%E4%BD%95%E5%B7%A5%E4%BD%9C%E7%9A%84/，而且里面的变量名称都是var数字格式的,没法做到见名知意的，看的头都大了，可能作者当时写的时候就没想让上层开发人员去良好的阅读这个功能的吧，哈哈哈，碍于篇幅所限，我这里就只贴一小部分简单的代码，剩下的你还有兴趣的话欢迎加我联系方式一起研究哈。</p>
+
+<figure class="highlight"><pre><code class="language-java" data-lang="java"><span class="kd">private</span> <span class="kt">byte</span><span class="o">[]</span> <span class="nf">generateClassFile</span><span class="o">()</span> <span class="o">{</span>
+	<span class="c1">//添加代理方法，Object的hashcode、equal、toString三个方法</span>
+	<span class="k">this</span><span class="o">.</span><span class="na">addProxyMethod</span><span class="o">(</span><span class="n">hashCodeMethod</span><span class="o">,</span> <span class="nc">Object</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+	<span class="k">this</span><span class="o">.</span><span class="na">addProxyMethod</span><span class="o">(</span><span class="n">equalsMethod</span><span class="o">,</span> <span class="nc">Object</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+	<span class="k">this</span><span class="o">.</span><span class="na">addProxyMethod</span><span class="o">(</span><span class="n">toStringMethod</span><span class="o">,</span> <span class="nc">Object</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+	
+	<span class="nc">Class</span><span class="o">[]</span> <span class="n">var1</span> <span class="o">=</span> <span class="k">this</span><span class="o">.</span><span class="na">interfaces</span><span class="o">;</span>
+	<span class="kt">int</span> <span class="n">var2</span> <span class="o">=</span> <span class="n">var1</span><span class="o">.</span><span class="na">length</span><span class="o">;</span>
+	
+	<span class="kt">int</span> <span class="n">var3</span><span class="o">;</span>
+	<span class="nc">Class</span> <span class="n">var4</span><span class="o">;</span>
+	<span class="c1">//遍历添加接口数组中的方法</span>
+	<span class="k">for</span><span class="o">(</span><span class="n">var3</span> <span class="o">=</span> <span class="mi">0</span><span class="o">;</span> <span class="n">var3</span> <span class="o">&lt;</span> <span class="n">var2</span><span class="o">;</span> <span class="o">++</span><span class="n">var3</span><span class="o">)</span> <span class="o">{</span>
+		<span class="n">var4</span> <span class="o">=</span> <span class="n">var1</span><span class="o">[</span><span class="n">var3</span><span class="o">];</span>
+		<span class="c1">//获取接口中的所有方法</span>
+		<span class="nc">Method</span><span class="o">[]</span> <span class="n">var5</span> <span class="o">=</span> <span class="n">var4</span><span class="o">.</span><span class="na">getMethods</span><span class="o">();</span>
+		<span class="kt">int</span> <span class="n">var6</span> <span class="o">=</span> <span class="n">var5</span><span class="o">.</span><span class="na">length</span><span class="o">;</span>
+		<span class="c1">//将接口中的所有方便遍历添加进去</span>
+		<span class="k">for</span><span class="o">(</span><span class="kt">int</span> <span class="n">var7</span> <span class="o">=</span> <span class="mi">0</span><span class="o">;</span> <span class="n">var7</span> <span class="o">&lt;</span> <span class="n">var6</span><span class="o">;</span> <span class="o">++</span><span class="n">var7</span><span class="o">)</span> <span class="o">{</span>
+			<span class="nc">Method</span> <span class="n">var8</span> <span class="o">=</span> <span class="n">var5</span><span class="o">[</span><span class="n">var7</span><span class="o">];</span>
+			<span class="k">this</span><span class="o">.</span><span class="na">addProxyMethod</span><span class="o">(</span><span class="n">var8</span><span class="o">,</span> <span class="n">var4</span><span class="o">);</span>
+		<span class="o">}</span>
+	<span class="o">}</span>
+	<span class="c1">//......</span>
+<span class="o">}</span></code></pre></figure>
+
+<p>上面的代码就是给代理类添加方法的实现，是不是很简单呢(屁嘞，里面只是简单校验并缓存起来而已，后面再统一取出来处理)，基本是只要是没有冲突，不太复杂的类关系，这里收集的方法后面都会加入到代理类中，所以也可以说这就是给代理类加方法的实现啦，吼吼吼。</p>
+
+<p>不知不觉已经写到这里了，上面的基本大概讲了一下JDK动态代理的运作已经大概实现了，本人水平有限，有错误的地方，欢迎添加我的联系方式给我指正。</p>
+:ET
